@@ -1,0 +1,40 @@
+{
+  "direct": {
+    "name": "direct to upstream (no gateway)",
+    "requests": 3000,
+    "wall_seconds": 0.282,
+    "rps": 10622.9,
+    "mean_ms": 2.733,
+    "p50_ms": 2.602,
+    "p95_ms": 3.2,
+    "p99_ms": 5.484
+  },
+  "through_gateway": {
+    "name": "through llm-guard",
+    "requests": 3000,
+    "wall_seconds": 0.736,
+    "rps": 4075.5,
+    "mean_ms": 7.341,
+    "p50_ms": 7.052,
+    "p95_ms": 8.161,
+    "p99_ms": 19.062
+  },
+  "overhead_ms": 4.608,
+  "overhead_pct": 168.606,
+  "requests": 3000,
+  "concurrency": 32,
+  "rows_recorded": 3750,
+  "streamed_rows": 750,
+  "priced_rows": 3750,
+  "streaming": {
+    "name": "through llm-guard (SSE stream)",
+    "requests": 750,
+    "wall_seconds": 0.191,
+    "rps": 3931.0,
+    "mean_ms": 7.54,
+    "p50_ms": 7.512,
+    "p95_ms": 8.596,
+    "p99_ms": 10.011
+  },
+  "python": "3.12.14"
+}
