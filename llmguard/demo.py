@@ -182,8 +182,8 @@ def generate_records(
 def generate_agent_loop(
     *,
     now: Optional[datetime] = None,
-    steps: int = 46,
-    minutes_ago_start: int = 9,
+    steps: int = 180,
+    minutes_ago_start: int = 40,
     key: str = "prod-agent",
     project: str = "support-agent",
 ) -> List[RequestRecord]:
@@ -202,7 +202,10 @@ def generate_agent_loop(
     records: List[RequestRecord] = []
     # Context grows every step: this is the mechanism, not just the symptom.
     for step in range(steps):
-        input_tokens = 4_000 + step * 620
+        # Context grows every step. A 180-step chain at ~1200 tokens of growth
+        # per step ends up resending roughly 100K tokens per call, which is the
+        # shape of the documented incident and the reason it gets expensive.
+        input_tokens = 4_000 + step * 1_200
         output_tokens = max(int(input_tokens / 74), 18)
         offset = minutes_ago_start - (step / max(steps, 1)) * minutes_ago_start
         ts = now - timedelta(minutes=max(offset, 0.05))

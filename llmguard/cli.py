@@ -214,6 +214,99 @@ def cmd_budget(args: argparse.Namespace) -> int:
         store.close()
 
 
+def cmd_diagnose(args: argparse.Namespace) -> int:
+    """Produce the client-facing cost diagnosis."""
+    from .diagnose import diagnose
+    from .diagnosis_report import render_diagnosis_html
+
+    store = _store(args)
+    try:
+        d = diagnose(store, days=args.days)
+    finally:
+        store.close()
+
+    if args.format == "json":
+        print(json.dumps({
+            "client": args.client,
+            "days": d.days,
+            "total_spend_usd": round(d.total_spend, 4),
+            "monthly_spend_usd": round(d.monthly(d.total_spend), 2),
+            "total_requests": d.total_requests,
+            "total_tokens": d.total_tokens,
+            "distinct_models": d.distinct_models,
+            "distinct_keys": d.distinct_keys,
+            "addressable_monthly_low": round(sum(f.monthly_saving_low for f in d.findings), 2),
+            "addressable_monthly_high": round(sum(f.monthly_saving_high for f in d.findings), 2),
+            "findings": [
+                {
+                    "key": f.key, "title": f.title, "detail": f.detail,
+                    "confidence": f.confidence, "effort": f.effort,
+                    "monthly_saving_low": round(f.monthly_saving_low, 2),
+                    "monthly_saving_high": round(f.monthly_saving_high, 2),
+                    "evidence": f.evidence, "remedy": f.remedy,
+                }
+                for f in d.ranked
+            ],
+            "gaps": d.gaps,
+        }, indent=2, default=str))
+        return 0
+
+    if args.format == "text":
+        color = _is_tty() and not args.no_color
+        from .report import Style
+        s = Style(color)
+        print()
+        print(s("  LLM Cost Diagnosis", "bold"))
+        print(s(f"  {d.total_requests:,} requests over {d.days} days"
+                + (f"   ·   client: {args.client}" if args.client else ""), "dim"))
+        print(s("  " + "─" * 74, "dim"))
+        print()
+        spend_m = d.monthly(d.total_spend)
+        lo = sum(f.monthly_saving_low for f in d.findings)
+        hi = sum(f.monthly_saving_high for f in d.findings)
+        print(f"  {'Measured spend':<26}{money(spend_m)}/month")
+        print(f"  {'Addressable (upper bound)':<26}{money(lo)} – {money(hi)}/month"
+              + s(f"   ({hi / spend_m * 100:.0f}% of bill)" if spend_m else "", "dim"))
+        print()
+        if not d.ranked:
+            print(s("  No findings. Data may be too small to analyse.", "yellow"))
+        for i, f in enumerate(d.ranked, 1):
+            tone = "green" if f.has_money else "dim"
+            print(f"  {s(str(i) + '.', 'bold')} {s(f.title, 'bold')}")
+            if f.has_money:
+                print(f"     {s(_money_range(f), tone)}   {s('[' + f.confidence + ']', 'dim')}")
+            else:
+                print(s(f"     [{'no direct saving'} · {f.confidence}]", "dim"))
+            for line in _wrap_text(f.detail, 70):
+                print(f"     {line}")
+            for line in _wrap_text("→ " + f.remedy, 70):
+                print(s(f"     {line}", "dim"))
+            print()
+        if d.gaps:
+            print(s("  What this cannot tell you", "bold"))
+            for g in d.gaps:
+                for line in _wrap_text("• " + g, 70):
+                    print(s(f"  {line}", "dim"))
+            print()
+        return 0
+
+    html_doc = render_diagnosis_html(d, client=args.client or "")
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(html_doc, encoding="utf-8")
+    print(f"Wrote {out}  ({len(html_doc):,} bytes)")
+    print()
+    print("  Open it in a browser and print to PDF, or send the HTML as-is.")
+    print("  The layout is set for A4 with page breaks; no external assets.")
+    return 0
+
+
+def _money_range(f) -> str:
+    if abs(f.monthly_saving_high - f.monthly_saving_low) < 1:
+        return f"${f.mid_saving:,.0f}/mo"
+    return f"${f.monthly_saving_low:,.0f}–${f.monthly_saving_high:,.0f}/mo"
+
+
 def cmd_anomalies(args: argparse.Namespace) -> int:
     """Report suspected runaway agent spend."""
     from .detectors import DetectionConfig, detect_all
@@ -549,6 +642,15 @@ def build_parser() -> argparse.ArgumentParser:
     bsub.add_parser("list", help="list budgets")
     p.set_defaults(func=cmd_budget)
 
+
+
+    p = sub.add_parser("diagnose", help="produce the client-facing LLM cost diagnosis")
+    p.add_argument("--days", type=int, default=30)
+    p.add_argument("--client", default="", help="client name, appears on the report")
+    p.add_argument("--format", choices=["html", "json", "text"], default="html")
+    p.add_argument("--out", default="llm-cost-diagnosis.html")
+    p.add_argument("--no-color", action="store_true")
+    p.set_defaults(func=cmd_diagnose)
 
     p = sub.add_parser("anomalies", help="detect runaway agent spend (loops, storms, bursts)")
     p.add_argument("--window", type=int, default=15, help="lookback window in minutes")

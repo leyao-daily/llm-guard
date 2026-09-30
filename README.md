@@ -76,6 +76,7 @@ That prints a spend report with prioritised actions. Then:
 
 ```bash
 python3 -m llmguard anomalies                    # runaway agent spend, right now
+python3 -m llmguard diagnose --client "Acme"     # the written report, print to PDF
 python3 -m llmguard dashboard --out dash.html   # self-contained HTML, open in any browser
 python3 -m llmguard cost gpt-6.1-sol --input 50000 --output 2000 --count 1000
 python3 -m llmguard models                       # the built-in price table
@@ -178,6 +179,37 @@ The output is written as advice, not as a dashboard. Each finding is derived and
 | *"Prompt caching is worth up to $175/month"* | Your cache hit rate is low; repeated prefixes are the usual cause |
 | *"payments-team is projected over budget"* | Fix the budget, or fix the feature, before month-end |
 | *"3 models have no price entry"* | Your headline number is under-reporting; one line fixes it |
+
+## The written diagnosis
+
+`report` is for you. `diagnose` is the thing you send to somebody else.
+
+```bash
+python3 -m llmguard diagnose --days 30 --client "Acme Corp" --out diagnosis.html
+# or: --format text   (same content, terminal)
+# or: --format json   (for your own tooling)
+```
+
+It runs seven checks and writes a document with a verdict, a ranked list of what
+to fix, the evidence behind every number, and an explicit section on what the
+analysis cannot tell you. Print it to PDF from a browser; the layout is set for
+A4 with page breaks.
+
+Each finding carries an estimate of what it is worth per month and a confidence
+level, because some of these are arithmetic on your own data and some are a
+judgement about your architecture:
+
+| Label | Means |
+|---|---|
+| **Certain** | Arithmetic on your data. The number is what it is. |
+| **Likely** | Depends on one stated assumption, written next to it. |
+| **Worth testing** | A hypothesis. Worth a bounded experiment, not a committed budget. |
+
+The estimates are deliberately conservative and the report says outright that
+they overlap: trimming context and improving cache hit rates act on the same
+tokens, so they cannot both be collected in full. A diagnosis that overstates
+savings gets found out on the next invoice, and then nothing else in it is
+believed either.
 
 ## Measured overhead
 
