@@ -9,7 +9,7 @@ description = "Self-hosted gateway that detects runaway AI agent spend, attribut
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
-authors = [{ name = "LYE LABS LIMITED", email = "yaole.intel@gmail.com" }]
+authors = [{ name = "LYE LABS LIMITED", email = "hello@lye-labs.com" }]
 keywords = [
     "llm",
     "agent",

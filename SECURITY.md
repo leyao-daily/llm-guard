@@ -6,7 +6,7 @@ This gateway sits in the request path of production LLM traffic and holds upstre
 credentials in memory. A vulnerability here is therefore worth reporting privately
 first.
 
-**Please email `yaole.intel@gmail.com`** rather than opening a public issue.
+**Please email `hello@lye-labs.com`** rather than opening a public issue.
 
 Include, as far as you can:
 
