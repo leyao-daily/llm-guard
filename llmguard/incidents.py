@@ -325,6 +325,7 @@ PATTERNS_BY_KEY = {p.key: p for p in PATTERNS}
 # Measuring, and matching
 # ---------------------------------------------------------------------------
 def measure(store: Store, *, window_sql: str, params: Sequence = (), granularity: str = "request") -> Dict[str, float]:
+    """Compute every measure the patterns test against, for one window."""
     """Compute every measure the patterns test against, from the customer's data."""
     head = store.one(
         f"""SELECT COUNT(*) AS row_count,

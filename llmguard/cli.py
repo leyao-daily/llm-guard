@@ -215,6 +215,112 @@ def cmd_budget(args: argparse.Namespace) -> int:
         store.close()
 
 
+def cmd_engage(args: argparse.Namespace) -> int:
+    """Record a baseline diagnosis, or measure what actually happened after it."""
+    from .outcomes import describe_calibration, measure_engagement, open_engagement
+
+    store = _store(args)
+    try:
+        if args.action == "new":
+            e = open_engagement(store, args.client, baseline_days=args.baseline_days,
+                                notes=args.note or "")
+            print()
+            print(f"  Engagement #{e.id} for {e.client}")
+            print(f"  baseline window   {e.baseline_from} .. {e.baseline_to}  ({e.baseline_days} days)")
+            print(f"  baseline spend    ${e.baseline_spend:,.2f}  ({_per_month(e.baseline_spend, e.baseline_days)})")
+            print(f"  predicted saving  ${e.predicted_low:,.0f} - ${e.predicted_high:,.0f} per month")
+            if e.findings:
+                print()
+                print("  frozen findings, which is what we will later be held to:")
+                for f in e.findings:
+                    tag = f"${f['predicted_low']:,.0f}-${f['predicted_high']:,.0f}" if f["predicted_high"] else "-"
+                    print(f"    {tag:>18}  {f['title'][:58]}")
+            print()
+            print(f"  Inspect from the client's own usage data.")
+            print(f"  After the fix has been live for {args.baseline_days} days:")
+            print(f"    llm-guard engage measure --client {e.client!r}")
+            return 0
+
+        if args.action == "measure":
+            r, warnings = measure_engagement(store, args.client, days=args.days, note=args.note or "")
+            print()
+            if r is None:
+                print("  Cannot measure this engagement.")
+                for w in warnings:
+                    print(f"    {w}")
+                return 1
+            print(f"  Engagement #{r.engagement.id} for {r.engagement.client}")
+            print(f"  baseline window   {r.engagement.baseline_from} .. {r.engagement.baseline_to}")
+            print(f"  follow-up window  {r.window_from} .. {r.window_to}  ({r.days} days)")
+            print()
+            print(f"  baseline/month    ${r.monthly_baseline:,.2f}")
+            print(f"  follow-up/month   ${r.monthly_spend:,.2f}")
+            print(f"  change            ${-r.realised_saving:+,.2f}")
+            print(f"  predicted         ${r.engagement.predicted_low:,.0f} - ${r.engagement.predicted_high:,.0f}")
+            ratio = r.ratio_to_prediction
+            if ratio is not None:
+                print(f"  realised/predicted {ratio:.2f}")
+            print()
+            for w in warnings:
+                print(f"  warning: {w}")
+            print()
+            print(describe_calibration(store))
+            return 0
+
+        if args.action == "list":
+            from .outcomes import list_engagements
+            rows = list_engagements(store)
+            print()
+            if not rows:
+                print("  No engagements recorded.")
+                return 0
+            for e in rows:
+                print(f"  #{e.id}  {e.client:<24} {e.created_at[:10]}  "
+                      f"baseline {_per_month(e.baseline_spend, e.baseline_days):>16}  "
+                      f"predicted ${e.predicted_low:,.0f}-${e.predicted_high:,.0f}  [{e.status}]")
+            return 0
+    finally:
+        store.close()
+    return 2
+
+
+def _per_month(total: float, days: int) -> str:
+    return f"${total / max(days, 1) * 30:,.2f}/month"
+
+
+def cmd_outcomes(args: argparse.Namespace) -> int:
+    """How well have the predictions held up?"""
+    from .outcomes import calibrate, describe_calibration, list_engagements
+
+    store = _store(args)
+    try:
+        if args.format == "json":
+            c = calibrate(store)
+            print(json.dumps({
+                "engagements_total": c.total,
+                "engagements_measured": c.measured,
+                "median_realised_over_predicted": c.median_ratio,
+                "mean_realised_over_predicted": c.mean_ratio,
+                "over_predicted": c.overpredicted,
+                "ratios": c.ratios,
+                "sample_is_sufficient": c.has_sample,
+                "engagements": [
+                    {"id": e.id, "client": e.client, "created_at": e.created_at,
+                     "status": e.status, "baseline_days": e.baseline_days,
+                     "baseline_spend": e.baseline_spend,
+                     "predicted_low": e.predicted_low, "predicted_high": e.predicted_high}
+                    for e in list_engagements(store)
+                ],
+            }, indent=2, default=str))
+            return 0
+        print()
+        print(describe_calibration(store))
+        print()
+        return 0
+    finally:
+        store.close()
+
+
 def cmd_patterns(args: argparse.Namespace) -> int:
     """Print the catalogued failure patterns this tool detects."""
     from .incidents import PATTERNS, describe_catalogue
@@ -745,6 +851,19 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 
+
+
+    p = sub.add_parser("engage", help="record a baseline and measure what actually happened")
+    p.add_argument("action", choices=["new", "measure", "list"])
+    p.add_argument("--client", default="", help="required for new and measure")
+    p.add_argument("--baseline-days", type=int, default=30)
+    p.add_argument("--days", type=int, default=30, help="follow-up window length")
+    p.add_argument("--note", default="")
+    p.set_defaults(func=cmd_engage)
+
+    p = sub.add_parser("outcomes", help="how well the saving predictions have held up")
+    p.add_argument("--format", choices=["text", "json"], default="text")
+    p.set_defaults(func=cmd_outcomes)
 
     p = sub.add_parser("patterns", help="the catalogued failure patterns this tool detects")
     p.add_argument("--format", choices=["text", "json"], default="text")

@@ -213,6 +213,54 @@ the volume thresholds scale down (six daily buckets is a week of history; six
 requests is nothing), and the report says outright that it is looking at buckets.
 A context loop is still findable, because the shape is the point.
 
+## Knowing whether the advice worked
+
+Every saving estimate in a report is a range we chose. This is how that stops
+being true.
+
+```bash
+# Snapshot the diagnosis as a baseline. Frozen, so we cannot move the goalposts.
+python3 -m llmguard engage new --client "Acme Corp" --baseline-days 30
+
+# A month after the fix has been live, measure the window that follows the baseline.
+python3 -m llmguard engage measure --client "Acme Corp" --days 30
+
+# How well do the predictions hold up across every engagement?
+python3 -m llmguard outcomes
+```
+
+```
+Prediction calibration
+
+  engagements recorded     7
+  with a measurement       5
+  median realised/predicted 0.58
+  over-predicted           4 of 5
+
+  Based on 5 measurement(s), a finding predicted at $X has historically
+  realised about $0.58X.
+```
+
+That last line is the whole point. A free tool can compute your token ratio. It
+cannot tell you what fraction of a predicted saving usually survives contact with
+production, because it has never followed an engagement to completion.
+
+Three things this does deliberately:
+
+- **The baseline is frozen at diagnosis time**, not recomputed when measuring.
+  Otherwise last month's prediction quietly becomes this month's smaller number.
+- **The follow-up reads the window after the baseline**, not recent traffic. For a
+  month after the first version shipped, every measurement compared fresh traffic
+  against fresh traffic and reported exactly zero change.
+- **A volume swing is reported as a confound, not a saving.** If request volume
+  fell 30%, spend fell, and nothing was fixed, that is not a saving and the ledger
+  says so. Windows without enough traffic to be comparable are declined rather
+  than estimated.
+
+And it records the misses. A table that only ever shows successes is a marketing
+asset rather than a measurement one, and the first prospect who asks to see the
+failures would find that out.
+
 ## Where the findings come from
 
 The failure patterns this tool detects are not our invention. They come from two

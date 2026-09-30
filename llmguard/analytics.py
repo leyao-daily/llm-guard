@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Sequence
+from typing import NamedTuple, Dict, List, Optional, Sequence
 
 from .storage import Store, iso
 
@@ -21,6 +21,45 @@ CACHE_READ_DISCOUNT = 0.10
 # Alert when projected month-end spend exceeds budget by this factor.
 BUDGET_WARN_RATIO = 0.80
 BUDGET_BREACH_RATIO = 1.00
+
+
+class Window(NamedTuple):
+    """A time window, either trailing from now or two absolute dates.
+
+    Needed because a before/after comparison reads two adjacent windows in the
+    past, and a trailing window can only ever express one of them. Without this,
+    a follow-up measurement looks at the same recent traffic the baseline just
+    looked at and reports no change, or worse, reports a change that is really
+    just the passage of time.
+    """
+
+    sql: str
+    params: List[object]
+    start: Optional[str] = None    # 'YYYY-MM-DD'
+    end: Optional[str] = None
+
+    @property
+    def days(self) -> int:
+        if self.start and self.end:
+            a = datetime.strptime(self.start, "%Y-%m-%d")
+            b = datetime.strptime(self.end, "%Y-%m-%d")
+            return max((b - a).days, 1)
+        return 0
+
+
+def window_between(start: str, end: str) -> Window:
+    """Half-open absolute window: start inclusive, end exclusive."""
+    return Window(
+        sql="ts >= ? AND ts < ?",
+        params=[f"{start} 00:00:00", f"{end} 00:00:00"],
+        start=start,
+        end=end,
+    )
+
+
+def trailing_window(days: int, offset_days: int = 0) -> Window:
+    where, params = _window_clause(days, offset_days=offset_days)
+    return Window(sql=where, params=list(params))
 
 
 def _window_clause(days: int, *, offset_days: int = 0) -> tuple[str, list]:

@@ -25,7 +25,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
-from .analytics import _window_clause
+from .analytics import Window, _window_clause
 from .pricing import get_price, resolve_model
 from .storage import Store
 
@@ -46,6 +46,13 @@ CONCENTRATION_SHARE = 0.6
 CONFIDENCE_ARITHMETIC = "certain"      # pure arithmetic on your own data
 CONFIDENCE_LIKELY = "likely"           # depends on a stated assumption
 CONFIDENCE_JUDGEMENT = "worth testing"  # a hypothesis about your architecture
+
+
+def resolve_window(days: int, window: Optional[Window] = None) -> Window:
+    """Days, or an explicit window. Everything downstream takes the window."""
+    if window is not None:
+        return window
+    return Window(sql=_window_clause(days)[0], params=list(_window_clause(days)[1]))
 
 
 @dataclass
@@ -142,7 +149,7 @@ class Diagnosis:
 # individual checks
 # ---------------------------------------------------------------------------
 def check_context_bloat(
-    store: Store, days: int, *, min_rows: int = 20, unit: str = "requests"
+    store: Store, days: int, *, window: Optional[Window] = None, min_rows: int = 20, unit: str = "requests"
 ) -> Optional[Finding]:
     """Input-heavy traffic on one key: the prompt is being resent, not the answer made.
 
@@ -151,7 +158,8 @@ def check_context_bloat(
     everything and missed a 74:1 loop sitting alongside a lot of healthy chat
     traffic, which is exactly the failure a client is paying to have found.
     """
-    where, params = _window_clause(days)
+    win = resolve_window(days, window)
+    where, params = win.sql, win.params
     rows = store.query(
         f"""
         SELECT api_key_id,
@@ -187,7 +195,7 @@ def check_context_bloat(
 
     key = str(worst["api_key_id"])
     requests = int(worst["requests"])
-    per_input = _blended_input_price(store, days)
+    per_input = _blended_input_price(store, days, window=window)
     addressable = total_input * per_input
     low, high = addressable * 0.25, addressable * 0.55
 
@@ -238,9 +246,10 @@ def check_context_bloat(
     )
 
 
-def _blended_input_price(store: Store, days: int) -> float:
+def _blended_input_price(store: Store, days: int, *, window: Optional[Window] = None) -> float:
     """USD per input token, blended across models by actual token volume."""
-    where, params = _window_clause(days)
+    win = resolve_window(days, window)
+    where, params = win.sql, win.params
     rows = store.query(
         f"""SELECT model,
                    SUM(input_tokens + cached_input_tokens + cache_write_tokens) AS tok
@@ -265,10 +274,11 @@ def _blended_input_price(store: Store, days: int) -> float:
 
 
 def check_cache_opportunity(
-    store: Store, days: int, *, min_tokens: int = 50_000
+    store: Store, days: int, *, window: Optional[Window] = None, min_tokens: int = 50_000
 ) -> Optional[Finding]:
     """Repeated prefixes that are not being cached, scoped per key."""
-    where, params = _window_clause(days)
+    win = resolve_window(days, window)
+    where, params = win.sql, win.params
     rows = store.query(
         f"""
         SELECT api_key_id,
@@ -299,7 +309,7 @@ def check_cache_opportunity(
         return None
 
     key = str(worst["api_key_id"])
-    per_input = _blended_input_price(store, days)
+    per_input = _blended_input_price(store, days, window=window)
     converted = fresh * 0.35
     low = converted * per_input * 0.6
     high = converted * per_input * 0.9
@@ -331,9 +341,10 @@ def check_cache_opportunity(
     )
 
 
-def check_routing(store: Store, days: int, *, min_rows: int = 50) -> Optional[Finding]:
+def check_routing(store: Store, days: int, *, window: Optional[Window] = None, min_rows: int = 50) -> Optional[Finding]:
     """One expensive model doing work a cheaper one could do."""
-    where, params = _window_clause(days)
+    win = resolve_window(days, window)
+    where, params = win.sql, win.params
     row = store.one(
         f"""SELECT COALESCE(SUM(cost_usd),0) AS cost, COUNT(*) AS n
             FROM requests WHERE {where} AND cost_usd IS NOT NULL""",
@@ -393,9 +404,10 @@ def check_routing(store: Store, days: int, *, min_rows: int = 50) -> Optional[Fi
     )
 
 
-def check_errors(store: Store, days: int, *, min_rows: int = 50) -> Optional[Finding]:
+def check_errors(store: Store, days: int, *, window: Optional[Window] = None, min_rows: int = 50) -> Optional[Finding]:
     """Failed calls: cost with no output."""
-    where, params = _window_clause(days)
+    win = resolve_window(days, window)
+    where, params = win.sql, win.params
     row = store.one(
         f"""SELECT COUNT(*) AS n,
                    COALESCE(SUM(CASE WHEN status >= 400 OR error <> '' THEN 1 ELSE 0 END),0) AS bad,
@@ -448,9 +460,10 @@ def check_errors(store: Store, days: int, *, min_rows: int = 50) -> Optional[Fin
     )
 
 
-def check_attribution(store: Store, days: int, *, min_rows: int = 100) -> Optional[Finding]:
+def check_attribution(store: Store, days: int, *, window: Optional[Window] = None, min_rows: int = 100) -> Optional[Finding]:
     """No per-key attribution: the bill cannot be acted on."""
-    where, params = _window_clause(days)
+    win = resolve_window(days, window)
+    where, params = win.sql, win.params
     row = store.one(
         f"""SELECT COUNT(DISTINCT api_key_id) AS keys, COUNT(*) AS n
             FROM requests WHERE {where}""",
@@ -483,9 +496,10 @@ def check_attribution(store: Store, days: int, *, min_rows: int = 100) -> Option
     )
 
 
-def check_unpriced(store: Store, days: int) -> Tuple[Optional[Finding], List[str]]:
+def check_unpriced(store: Store, days: int, *, window: Optional[Window] = None) -> Tuple[Optional[Finding], List[str]]:
     """Traffic on models with no price on file: invisible spend."""
-    where, params = _window_clause(days)
+    win = resolve_window(days, window)
+    where, params = win.sql, win.params
     rows = store.query(
         f"""SELECT model, COUNT(*) AS n
             FROM requests
@@ -520,9 +534,10 @@ def check_unpriced(store: Store, days: int) -> Tuple[Optional[Finding], List[str
     )
 
 
-def check_concentration(store: Store, days: int) -> Optional[Finding]:
+def check_concentration(store: Store, days: int, *, window: Optional[Window] = None) -> Optional[Finding]:
     """Too much of the bill in one model: no leverage if its price changes."""
-    where, params = _window_clause(days)
+    win = resolve_window(days, window)
+    where, params = win.sql, win.params
     rows = store.query(
         f"""SELECT model, COALESCE(SUM(cost_usd),0) AS cost
             FROM requests WHERE {where} AND cost_usd IS NOT NULL
@@ -578,7 +593,8 @@ PATTERN_FOR_FINDING = {
 }
 
 
-def attach_catalogue(findings: List[Finding], store: Store, days: int, granularity: str) -> None:
+def attach_catalogue(findings: List[Finding], store: Store, days: int, granularity: str,
+                     window: Optional[Window] = None) -> None:
     """Annotate findings with the catalogued pattern they correspond to.
 
     Scoped to the same subject the finding is about. A loop is usually confined to
@@ -593,7 +609,8 @@ def attach_catalogue(findings: List[Finding], store: Store, days: int, granulari
     from .analytics import _window_clause
     from .incidents import PATTERNS_BY_KEY, match_patterns, measure
 
-    where, params = _window_clause(days)
+    win = resolve_window(days, window)
+    where, params = win.sql, win.params
     # Subjects named by the findings, so each can be measured on its own.
     subjects = []
     for finding in findings:
@@ -639,9 +656,10 @@ def attach_catalogue(findings: List[Finding], store: Store, days: int, granulari
 # ---------------------------------------------------------------------------
 # assembly
 # ---------------------------------------------------------------------------
-def diagnose(store: Store, days: int = 30) -> Diagnosis:
+def diagnose(store: Store, days: int = 30, *, window: Optional[Window] = None) -> Diagnosis:
     """Run every check and assemble the report."""
-    where, params = _window_clause(days)
+    win = resolve_window(days, window)
+    where, params = win.sql, win.params
     head = store.one(
         f"""SELECT COUNT(*) AS n,
                    COALESCE(SUM(cost_usd),0) AS cost,
@@ -689,12 +707,12 @@ def diagnose(store: Store, days: int = 30) -> Diagnosis:
     floor_ctx = d.volume_floor(20)
     floor_routing = d.volume_floor(50)
     for check in checks:
+        kwargs = {}
         if check is check_context_bloat:
-            finding = check(store, days, min_rows=floor_ctx, unit=d.unit)
+            kwargs = {"min_rows": floor_ctx, "unit": d.unit}
         elif check is check_routing:
-            finding = check(store, days, min_rows=floor_routing)
-        else:
-            finding = check(store, days)
+            kwargs = {"min_rows": floor_routing}
+        finding = check(store, days, window=win, **kwargs)
         if finding is not None:
             d.findings.append(finding)
 
@@ -738,5 +756,5 @@ def diagnose(store: Store, days: int = 30) -> Diagnosis:
             "buckets rather than calls."
         )
 
-    attach_catalogue(d.findings, store, days, granularity)
+    attach_catalogue(d.findings, store, days, granularity, window=win)
     return d
