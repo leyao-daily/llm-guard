@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-guard"
+version = "0.3.0"
+description = "Self-hosted gateway that detects runaway AI agent spend, attributes LLM cost, and enforces hard budgets. Zero runtime dependencies."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "LYE LABS LIMITED", email = "yaole.intel@gmail.com" }]
+keywords = [
+    "llm",
+    "agent",
+    "ai-agent",
+    "runaway-loop",
+    "cost-control",
+    "budget-enforcement",
+    "observability",
+    "finops",
+    "token-cost",
+    "openai",
+    "anthropic",
+    "proxy",
+    "gateway",
+    "reverse-proxy",
+    "self-hosted",
+    "air-gapped",
+    "zero-dependencies",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: System :: Monitoring",
+    "Topic :: Internet :: Proxy Servers",
+]
+# Intentionally empty: the gateway runs on the standard library alone so it can
+# be dropped into an air-gapped VPC with no package install.
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+llm-guard = "llmguard.cli:main"
+
+[project.urls]
+Homepage = "https://lye-labs.com"
+Repository = "https://github.com/leyao-daily/llm-guard"
+Changelog = "https://github.com/leyao-daily/llm-guard/releases"
+Issues = "https://github.com/leyao-daily/llm-guard/issues"
+
+[tool.setuptools]
+packages = ["llmguard"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
