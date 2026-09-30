@@ -3,8 +3,12 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "llm-guard"
-version = "0.3.0"
+# The distribution name is not the repository name. "llm-guard" is taken on PyPI
+# by Protect AI's prompt-injection guard (26 releases), so installing that name
+# gets you a different product entirely. The import package and the console
+# command both stay "llmguard" / "llm-guard", which is what people actually type.
+name = "llm-cost-guard"
+version = "0.4.0"
 description = "Self-hosted gateway that detects runaway AI agent spend, attributes LLM cost, and enforces hard budgets. Zero runtime dependencies."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -52,7 +56,7 @@ dev = ["pytest>=7.0"]
 llm-guard = "llmguard.cli:main"
 
 [project.urls]
-Homepage = "https://lye-labs.com"
+Homepage = "https://home.lye-labs.com/llm-guard/"
 Repository = "https://github.com/leyao-daily/llm-guard"
 Changelog = "https://github.com/leyao-daily/llm-guard/releases"
 Issues = "https://github.com/leyao-daily/llm-guard/issues"

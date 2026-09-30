@@ -49,3 +49,6 @@ Thumbs.db
 .env.*
 *.pem
 !tests/**/*.pem
+
+# Cloudflare Pages CLI scratch that should never be committed
+.wrangler/

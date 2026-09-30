@@ -64,11 +64,34 @@ So this one is deliberately boring underneath:
 
 ---
 
+## Install
+
+```bash
+pip install git+https://github.com/leyao-daily/llm-guard.git
+llm-guard doctor
+```
+
+There is deliberately no `pip install llm-guard`. **That name on PyPI belongs to
+Protect AI's prompt-injection guard** — an unrelated project, 26 releases — so
+installing it gets you different software entirely. The distribution here is
+`llm-cost-guard`, which is what will be published; the console command is
+`llm-guard` either way. Until it is on PyPI, install from the repository above.
+
+Python 3.9 or newer and nothing else: the runtime is the standard library.
+
 ## See it work in 30 seconds (no API key required)
 
 ```bash
-cd mvp/llm-guard
-python3 -m llmguard seed --reset --compare-days 30   # a month of realistic traffic
+llm-guard seed --reset --compare-days 30   # a month of realistic traffic
+llm-guard report
+```
+
+Or straight from a clone, with nothing installed:
+
+```bash
+git clone https://github.com/leyao-daily/llm-guard.git
+cd llm-guard
+python3 -m llmguard seed --reset --compare-days 30
 python3 -m llmguard report
 ```
 

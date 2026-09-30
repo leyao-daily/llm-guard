@@ -1,0 +1,69 @@
+name: release
+
+# Publishes llm-cost-guard to PyPI when a version tag is pushed.
+#
+# Uses PyPI Trusted Publishing (OIDC), so there is no API token stored anywhere.
+# One-time setup before the first release:
+#   1. Create the project "llm-cost-guard" on PyPI via a pending publisher:
+#      pypi.org/manage/account/publishing/ -> "Add a new pending publisher"
+#      owner: leyao-daily   repo: llm-guard   workflow: release.yml
+#      environment: pypi
+#   2. Create a GitHub environment named "pypi" in the repository settings.
+# Then: git tag v0.4.0 && git push origin v0.4.0
+#
+# The distribution name is deliberately NOT "llm-guard": that name belongs to
+# Protect AI's prompt-injection guard on PyPI.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install --upgrade build
+          python -m build
+      - name: Check the metadata and the artefact contents
+        run: |
+          python -m pip install --upgrade twine
+          twine check dist/*
+          python - <<'PY'
+          import glob, tarfile, zipfile
+          # The distribution must not claim the taken name.
+          import tomllib
+          meta = tomllib.load(open("pyproject.toml", "rb"))["project"]
+          assert meta["name"] == "llm-cost-guard", meta["name"]
+          assert meta["dependencies"] == [], "runtime dependencies must stay empty"
+          for path in glob.glob("dist/*.whl"):
+              names = zipfile.ZipFile(path).namelist()
+              assert not any(n.startswith("tests/") for n in names), "tests shipped"
+          print("artefact checks passed")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write        # required for trusted publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
