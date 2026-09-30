@@ -234,6 +234,17 @@ class Store:
             return list(self._conn.execute("SELECT * FROM budgets ORDER BY api_key_id"))
 
     # -- reads -------------------------------------------------------------
+    def execute(self, sql: str, params: Sequence[Any] = ()) -> int:
+        """Run a statement that changes rows. Returns the affected count.
+
+        Separate from query() so a read cannot accidentally be a write, and so
+        callers do not have to know that query() happens to commit too.
+        """
+        with self._lock:
+            cur = self._conn.execute(sql, tuple(params))
+            self._conn.commit()
+            return int(cur.rowcount if cur.rowcount is not None else 0)
+
     def query(self, sql: str, params: Sequence[Any] = ()) -> List[sqlite3.Row]:
         with self._lock:
             return list(self._conn.execute(sql, tuple(params)))

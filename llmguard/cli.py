@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import sys
+import urllib.error
 from pathlib import Path
 from typing import List, Optional
 
@@ -214,6 +215,72 @@ def cmd_budget(args: argparse.Namespace) -> int:
         store.close()
 
 
+def cmd_import(args: argparse.Namespace) -> int:
+    """Bring a prospect's usage data in, before they commit to anything."""
+    from .intake import (
+        CANONICAL_FIELDS,
+        import_anthropic_admin,
+        import_csv,
+        import_json,
+        import_openai_admin,
+    )
+
+    if args.sample:
+        print("bucket_start,provider,model,input_tokens,cached_input_tokens,"
+              "cache_write_tokens,output_tokens,cost_usd,workspace,api_key_id")
+        print("2026-09-01T00:00:00Z,openai,gpt-6.1-sol,180000,90000,0,12000,,prod-web")
+        print("2026-09-01T00:00:00Z,anthropic,claude-sonnet-4.5,220000,150000,4000,15000,,prod-agent")
+        print()
+        print("Required: " + ", ".join(CANONICAL_FIELDS))
+        print()
+        print("cost_usd is optional. Leave it blank and it is computed from the price")
+        print("table, which is fine for a first pass. If you can supply what the")
+        print("provider actually billed, do: it outranks our own arithmetic and the")
+        print("diagnosis will say so.")
+        return 0
+
+    store = _store(args)
+    try:
+        if args.source == "file":
+            text = Path(args.path).read_text(encoding="utf-8")
+            if args.path.lower().endswith(".json") or text.lstrip()[:1] in "[{":
+                result = import_json(store, text, default_provider=args.provider)
+            else:
+                result = import_csv(store, text, default_provider=args.provider)
+        elif args.source == "anthropic":
+            result = import_anthropic_admin(store, args.key, days=args.days)
+        elif args.source == "openai":
+            result = import_openai_admin(store, args.key, days=args.days)
+        else:
+            print(f"unknown source {args.source!r}", file=sys.stderr)
+            return 2
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", "replace")[:400]
+        print(f"HTTP {exc.code} from the provider:\n{body}", file=sys.stderr)
+        print()
+        if exc.code in (401, 403):
+            print("This usually means the key is not an organisation/admin key, or it", file=sys.stderr)
+            print("lacks read scope on usage. A normal API key will not work here.", file=sys.stderr)
+        return 1
+    except urllib.error.URLError as exc:
+        print(f"could not reach the provider: {exc.reason}", file=sys.stderr)
+        return 1
+    except ValueError as exc:
+        print(f"{exc}", file=sys.stderr)
+        return 1
+    finally:
+        store.close()
+
+    print()
+    print(result.describe())
+    print()
+    if result.rows_kept:
+        print("Next:  llm-guard diagnose --days %d" % args.days)
+    else:
+        print("Nothing imported. Run with --sample to see the expected columns.")
+    return 0 if result.rows_kept else 1
+
+
 def cmd_diagnose(args: argparse.Namespace) -> int:
     """Produce the client-facing cost diagnosis."""
     from .diagnose import diagnose
@@ -257,7 +324,7 @@ def cmd_diagnose(args: argparse.Namespace) -> int:
         s = Style(color)
         print()
         print(s("  LLM Cost Diagnosis", "bold"))
-        print(s(f"  {d.total_requests:,} requests over {d.days} days"
+        print(s(f"  {d.total_requests:,} {d.unit} over {d.days} days"
                 + (f"   ·   client: {args.client}" if args.client else ""), "dim"))
         print(s("  " + "─" * 74, "dim"))
         print()
@@ -643,6 +710,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_budget)
 
 
+
+
+    p = sub.add_parser("import", help="load usage data from a file or a provider's admin API")
+    p.add_argument("--source", choices=["file", "anthropic", "openai"], default="file")
+    p.add_argument("--path", default="", help="csv or json file, when --source file")
+    p.add_argument("--key", default="", help="admin api key, when --source anthropic|openai")
+    p.add_argument("--days", type=int, default=30)
+    p.add_argument("--provider", default="openai", help="default provider for file imports")
+    p.add_argument("--sample", action="store_true", help="print the expected columns and exit")
+    p.set_defaults(func=cmd_import)
 
     p = sub.add_parser("diagnose", help="produce the client-facing LLM cost diagnosis")
     p.add_argument("--days", type=int, default=30)

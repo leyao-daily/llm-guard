@@ -403,6 +403,8 @@ class Gateway:
         )
         # Rolling record of suspected loops, surfaced through /-/anomalies.
         self.loop_warnings: List[dict] = []
+        # Anything recorded through the proxy is genuine per-request data.
+        self.store.set_meta("granularity", "request")
 
     def _upstream_ssl_context(self) -> "ssl.SSLContext":
         """TLS context for upstream connections.

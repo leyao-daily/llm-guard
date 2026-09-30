@@ -87,6 +87,10 @@ class Diagnosis:
     unpriced_requests: int
     unpriced_models: List[str]
     findings: List[Finding] = field(default_factory=list)
+    # "request" when the data came through the proxy, "bucket" when it came from a
+    # provider export. Changes both the wording and the volume thresholds: 20
+    # daily buckets is most of a month, 20 requests is nothing.
+    granularity: str = "request"
     # What we could not determine, stated rather than hidden.
     gaps: List[str] = field(default_factory=list)
 
@@ -107,6 +111,24 @@ class Diagnosis:
     def days_covered(self) -> int:
         return max(self.days, 1)
 
+    @property
+    def unit(self) -> str:
+        return "daily buckets" if self.granularity == "bucket" else "requests"
+
+    def volume_floor(self, for_requests: int) -> int:
+        """Minimum volume before a finding is statistically worth reporting.
+
+        Bucketed data has far fewer rows for the same history, so a floor tuned
+        for per-request data silently suppresses every finding. Eight daily
+        buckets is a week; eight requests is noise.
+        """
+        if self.granularity == "bucket":
+            # Bucketed data has far fewer rows for the same history, so the floor
+            # has to scale down or every finding is suppressed. At least 2, at
+            # most 6, so a long enough window still clears it.
+            return min(max(for_requests // 10, 2), 6)
+        return for_requests
+
     def monthly(self, amount: float) -> float:
         """Scale a window figure to a 30-day month."""
         return amount / self.days_covered * 30.0
@@ -115,7 +137,9 @@ class Diagnosis:
 # ---------------------------------------------------------------------------
 # individual checks
 # ---------------------------------------------------------------------------
-def check_context_bloat(store: Store, days: int) -> Optional[Finding]:
+def check_context_bloat(
+    store: Store, days: int, *, min_rows: int = 20, unit: str = "requests"
+) -> Optional[Finding]:
     """Input-heavy traffic on one key: the prompt is being resent, not the answer made.
 
     Scoped per key rather than aggregated, because a global average dilutes the
@@ -136,9 +160,9 @@ def check_context_bloat(store: Store, days: int) -> Optional[Finding]:
         FROM requests
         WHERE {where} AND cost_usd IS NOT NULL AND model <> ''
         GROUP BY api_key_id
-        HAVING output_tokens > 0 AND requests >= 20
+        HAVING output_tokens > 0 AND requests >= ?
         """,
-        params,
+        tuple(params) + (min_rows,),
     )
     if not rows:
         return None
@@ -164,18 +188,26 @@ def check_context_bloat(store: Store, days: int) -> Optional[Finding]:
     low, high = addressable * 0.25, addressable * 0.55
 
     # Is this one key, or the whole account? The remedy differs.
-    account_wide = len(scored) > 1 and all(r >= CONTEXT_RATIO for r, *_ in scored)
-    scope = (
-        "Every key shows this shape, so it is systemic rather than one workload."
-        if account_wide
-        else f"The other keys look normal, so this is specific to {key}."
-    )
+    # "Systemic" should mean every key is bad, not merely that a second key
+    # cleared the threshold. Claiming systemic when one outlier drove it would
+    # point the client at the wrong remedy: a shared prompt template versus one
+    # runaway chain.
+    bad = sum(1 for r, *_ in scored if r >= CONTEXT_RATIO)
+    if bad == len(scored) and len(scored) > 1:
+        scope = f"All {len(scored)} attributed workloads show this shape, so it is systemic."
+    elif bad > 1:
+        scope = (
+            f"{bad} of {len(scored)} attributed workloads show this shape; the worst is "
+            f"{key}, so start there."
+        )
+    else:
+        scope = f"The other workloads look normal, so this is specific to {key}."
 
     return Finding(
         key="context_bloat",
         title=f"{key} sends {ratio:.0f} input tokens per output token",
         detail=(
-            f"Across {requests:,} priced requests, {key} sent {total_input:,} input tokens and "
+            f"Across {requests:,} priced {unit}, {key} sent {total_input:,} input tokens and "
             f"generated {output:,} output tokens. Normal chat traffic sits between 5:1 and 15:1. "
             f"A ratio this high normally means the same context is being resent on every step of "
             f"a chain rather than being summarised or trimmed. {scope}"
@@ -228,7 +260,9 @@ def _blended_input_price(store: Store, days: int) -> float:
     return weighted / total_tokens / 1_000_000
 
 
-def check_cache_opportunity(store: Store, days: int) -> Optional[Finding]:
+def check_cache_opportunity(
+    store: Store, days: int, *, min_tokens: int = 50_000
+) -> Optional[Finding]:
     """Repeated prefixes that are not being cached, scoped per key."""
     where, params = _window_clause(days)
     rows = store.query(
@@ -239,9 +273,9 @@ def check_cache_opportunity(store: Store, days: int) -> Optional[Finding]:
                COALESCE(SUM(cost_usd), 0)            AS cost
         FROM requests WHERE {where} AND cost_usd IS NOT NULL
         GROUP BY api_key_id
-        HAVING (fresh + cached) >= 50000
+        HAVING (fresh + cached) >= ?
         """,
-        params,
+        tuple(params) + (min_tokens,),
     )
     if not rows:
         return None
@@ -293,7 +327,7 @@ def check_cache_opportunity(store: Store, days: int) -> Optional[Finding]:
     )
 
 
-def check_routing(store: Store, days: int) -> Optional[Finding]:
+def check_routing(store: Store, days: int, *, min_rows: int = 50) -> Optional[Finding]:
     """One expensive model doing work a cheaper one could do."""
     where, params = _window_clause(days)
     row = store.one(
@@ -301,7 +335,7 @@ def check_routing(store: Store, days: int) -> Optional[Finding]:
             FROM requests WHERE {where} AND cost_usd IS NOT NULL""",
         params,
     )
-    if row is None or int(row["n"]) < 50:
+    if row is None or int(row["n"]) < min_rows:
         return None
     total_cost, total_requests = float(row["cost"]), int(row["n"])
     avg = total_cost / total_requests
@@ -355,7 +389,7 @@ def check_routing(store: Store, days: int) -> Optional[Finding]:
     )
 
 
-def check_errors(store: Store, days: int) -> Optional[Finding]:
+def check_errors(store: Store, days: int, *, min_rows: int = 50) -> Optional[Finding]:
     """Failed calls: cost with no output."""
     where, params = _window_clause(days)
     row = store.one(
@@ -366,7 +400,7 @@ def check_errors(store: Store, days: int) -> Optional[Finding]:
             FROM requests WHERE {where}""",
         params,
     )
-    if row is None or int(row["n"]) < 50:
+    if row is None or int(row["n"]) < min_rows:
         return None
     n, bad = int(row["n"]), int(row["bad"])
     if n == 0:
@@ -410,7 +444,7 @@ def check_errors(store: Store, days: int) -> Optional[Finding]:
     )
 
 
-def check_attribution(store: Store, days: int) -> Optional[Finding]:
+def check_attribution(store: Store, days: int, *, min_rows: int = 100) -> Optional[Finding]:
     """No per-key attribution: the bill cannot be acted on."""
     where, params = _window_clause(days)
     row = store.one(
@@ -418,7 +452,7 @@ def check_attribution(store: Store, days: int) -> Optional[Finding]:
             FROM requests WHERE {where}""",
         params,
     )
-    if row is None or int(row["n"]) < 100:
+    if row is None or int(row["n"]) < min_rows:
         return None
     keys = int(row["keys"])
     if keys > 1:
@@ -550,8 +584,11 @@ def diagnose(store: Store, days: int = 30) -> Diagnosis:
         params,
     )
 
+    granularity = (store.get_meta("granularity") or "request").lower()
+
     d = Diagnosis(
         days=days,
+        granularity=granularity,
         total_spend=float(head["cost"]) if head else 0.0,
         total_requests=int(head["n"]) if head else 0,
         total_tokens=int(head["tok"]) if head else 0,
@@ -564,15 +601,22 @@ def diagnose(store: Store, days: int = 30) -> Diagnosis:
         unpriced_models=[],
     )
 
-    for check in (
-        check_context_bloat,
-        check_cache_opportunity,
-        check_routing,
-        check_errors,
-        check_attribution,
-        check_concentration,
-    ):
-        finding = check(store, days)
+    # Errors and attribution need per-request rows. On bucketed data they would
+    # either find nothing or report something misleading, so they are skipped and
+    # the absence is stated in the gaps rather than papered over.
+    checks = [check_context_bloat, check_cache_opportunity, check_routing, check_concentration]
+    if d.granularity != "bucket":
+        checks += [check_errors, check_attribution]
+
+    floor_ctx = d.volume_floor(20)
+    floor_routing = d.volume_floor(50)
+    for check in checks:
+        if check is check_context_bloat:
+            finding = check(store, days, min_rows=floor_ctx, unit=d.unit)
+        elif check is check_routing:
+            finding = check(store, days, min_rows=floor_routing)
+        else:
+            finding = check(store, days)
         if finding is not None:
             d.findings.append(finding)
 
@@ -603,5 +647,12 @@ def diagnose(store: Store, days: int = 30) -> Diagnosis:
         "latency and cost. Findings about *why* volume is high are inferred from shape, "
         "not from reading your calls."
     )
+    if granularity == "bucket":
+        d.gaps.append(
+            "This data is aggregated by day rather than per request, so there is no "
+            "latency, status code or end-user dimension. Error rates and per-customer "
+            "unit economics cannot be derived from it, and the volume counts below are "
+            "buckets rather than calls."
+        )
 
     return d

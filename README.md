@@ -180,6 +180,39 @@ The output is written as advice, not as a dashboard. Each finding is derived and
 | *"payments-team is projected over budget"* | Fix the budget, or fix the feature, before month-end |
 | *"3 models have no price entry"* | Your headline number is under-reporting; one line fixes it |
 
+## Getting a prospect's data in, before they commit to anything
+
+The intake step decides whether any of this is sellable. If the answer is "deploy
+our gateway first", the conversation ends, because nobody deploys infrastructure
+to find out whether a diagnosis is worth paying for.
+
+Three ways in, least effort first:
+
+```bash
+# 1. straight from the provider's own admin API. One read-only key, no deployment.
+python3 -m llmguard import --source anthropic --key "$ANTHROPIC_ADMIN_KEY" --days 30
+python3 -m llmguard import --source openai    --key "$OPENAI_ADMIN_KEY"    --days 30
+
+# 2. a file, for anyone who would rather not hand over a key
+python3 -m llmguard import --source file --path usage.csv
+python3 -m llmguard import --sample      # prints the expected columns
+
+# 3. your own gateway database, if they already run it
+```
+
+Column names are matched loosely, so a straight export from a provider dashboard
+usually works without editing: `date`/`timestamp`/`start_time` all map to
+`bucket_start`, `prompt_tokens` to `input_tokens`, and so on. If a row carries
+what the provider actually billed in `cost_usd`, that figure replaces our own
+arithmetic. It should: the provider's number outranks our price table, always.
+
+**Provider data is aggregated, and the diagnosis adapts rather than pretending
+otherwise.** You get daily or hourly buckets, so there is no latency, no status
+code and no end-user dimension. The checks that need per-request rows are skipped,
+the volume thresholds scale down (six daily buckets is a week of history; six
+requests is nothing), and the report says outright that it is looking at buckets.
+A context loop is still findable, because the shape is the point.
+
 ## The written diagnosis
 
 `report` is for you. `diagnose` is the thing you send to somebody else.

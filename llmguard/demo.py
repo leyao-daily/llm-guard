@@ -284,6 +284,7 @@ def seed(
         records = records + incident_records
 
     inserted = store.insert_many(records)
+    store.set_meta("granularity", "request")
 
     if with_budgets:
         store.set_budget("prod-web", daily_usd=45.0, monthly_usd=1200.0, action="block")

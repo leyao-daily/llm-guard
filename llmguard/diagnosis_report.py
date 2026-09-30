@@ -263,7 +263,7 @@ def render_diagnosis_html(
   <h1>Where your LLM spend is going</h1>
   <p class="lede">
     {('Prepared for <strong>' + _e(client) + '</strong>. ') if client else ''}
-    An analysis of {d.total_requests:,} API calls over {d.days} days
+    An analysis of {d.total_requests:,} {d.unit} over {d.days} days
     {('from ' + _e(d.first_ts[:10]) + ' to ' + _e(d.last_ts[:10])) if d.first_ts else ''}.
   </p>
 
@@ -272,8 +272,8 @@ def render_diagnosis_html(
       <small>per 30 days</small></div>
     <div><div class="k">Addressable</div><div class="v save">{_money(save_low)}–{_money(save_high)}</div>
       <small>per 30 days, upper bound</small></div>
-    <div><div class="k">Requests</div><div class="v">{d.total_requests:,}</div>
-      <small>{d.days} days</small></div>
+    <div><div class="k">Data points</div><div class="v">{d.total_requests:,}</div>
+      <small>{d.unit}</small></div>
     <div><div class="k">Models / keys</div><div class="v">{d.distinct_models} / {d.distinct_keys}</div><small>attribution sources</small></div>
   </div>
 
