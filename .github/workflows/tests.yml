@@ -1,0 +1,57 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        include:
+          - os: macos-latest
+            python: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      # The point of the project: no install step is needed.
+      # The guarantee is enforced by a test so it runs on every interpreter the
+      # matrix covers -- including 3.9, where sys.stdlib_module_names does not
+      # exist. (An earlier inline version of this check used that attribute and
+      # therefore broke the 3.9 leg of its own matrix.)
+      - name: Assert zero third-party runtime dependencies
+        run: python -m unittest tests.test_no_dependencies -v
+
+      - name: Run test suite
+        run: python -m unittest discover -s tests -v
+
+      - name: Smoke-test the documented quickstart
+        run: |
+          export LLMGUARD_DB=/tmp/ci.db
+          python -m llmguard seed --reset --compare-days 30
+          python -m llmguard report --no-color
+          python -m llmguard anomalies --no-color
+          python -m llmguard dashboard --out /tmp/ci-dashboard.html
+          test -s /tmp/ci-dashboard.html
+
+      - name: Verify the demo loop is actually detected
+        run: |
+          export LLMGUARD_DB=/tmp/ci2.db
+          python -m llmguard seed --reset
+          python -m llmguard anomalies --format json > /tmp/anom.json
+          python - <<'PY'
+          import json, sys
+          data = json.load(open("/tmp/anom.json"))
+          kinds = {d["kind"] for d in data["detected"]}
+          print("detected:", sorted(kinds))
+          if "io_ratio" not in kinds:
+              sys.exit("io_ratio detector did not fire on the seeded loop")
+          PY

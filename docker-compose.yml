@@ -1,0 +1,53 @@
+# Two ways to run it.
+#
+#   Default (gateway in front of your own keys):
+#     docker compose up -d
+#     export OPENAI_BASE_URL=http://localhost:8787/v1
+#
+#   Demo (no upstream needed, shows the report on seeded data):
+#     docker compose run --rm demo
+#
+services:
+  gateway:
+    build: .
+    image: llm-guard:local
+    container_name: llm-guard
+    ports:
+      - "127.0.0.1:8787:8787"
+    environment:
+      # Pass your provider keys through from the host environment. Leave them
+      # unset to forward each caller's own Authorization header instead.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      LLMGUARD_DB: /data/usage.db
+    volumes:
+      - guard-data:/data
+    command:
+      - serve
+      - --host=0.0.0.0
+      - --port=8787
+    restart: unless-stopped
+    # The gateway is metering infrastructure: give it a small, predictable
+    # footprint and let it die rather than starve the app it sits next to.
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 256M
+    read_only: true
+    tmpfs:
+      - /tmp
+
+  # One-shot demo: seed a month of traffic and print the report.
+  demo:
+    image: llm-guard:local
+    build: .
+    profiles: ["demo"]
+    volumes:
+      - guard-data:/data
+    environment:
+      LLMGUARD_DB: /data/demo.db
+    command: ["seed", "--reset", "--compare-days", "30"]
+
+volumes:
+  guard-data:

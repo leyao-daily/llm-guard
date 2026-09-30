@@ -1,0 +1,51 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Test / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+*.cover
+
+# Databases produced by running the tool
+*.db
+*.db-wal
+*.db-shm
+llm-guard-dashboard.html
+dash.html
+usage.db
+
+# Captured provider fixtures: these contain model output. They are useful for
+# local verification, but review them before committing anything.
+fixtures/captured/
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Secrets — never commit a real key
+.env
+.env.*
+*.pem
+!tests/**/*.pem
