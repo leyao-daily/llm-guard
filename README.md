@@ -213,6 +213,45 @@ the volume thresholds scale down (six daily buckets is a week of history; six
 requests is nothing), and the report says outright that it is looking at buckets.
 A context loop is still findable, because the shape is the point.
 
+## Where the findings come from
+
+The failure patterns this tool detects are not our invention. They come from two
+public sources, and the report cites them so a client can check the claim instead
+of taking our word for it:
+
+- **OWASP AISVS C9.1** — Execution Budgets, Loop Control and Circuit Breakers
+  (revised 2026-07-13). Source of the qualitative patterns, and of the figure that
+  Fortune 500 companies leaked roughly $400M in unbudgeted agentic spend.
+- **arXiv:2606.04056** (Khan, 2026-06) — *Token Budgets: An Empirical Catalog of
+  63 LLM-Agent Budget-Overrun Incidents*, with an eight-cluster taxonomy and
+  per-incident dollar losses sourced to quoted GitHub issues.
+
+```bash
+python3 -m llmguard patterns          # the catalogue, with signals and sources
+python3 -m llmguard patterns --format json
+```
+
+What we add — and therefore the only part of this that is ours — is the mapping
+from a *narrative* pattern to an *observable signal in your own usage data*. The
+published catalogue describes incidents; it does not ship detectors. A report
+finding reads:
+
+> **Matches a documented failure pattern**
+> Unbounded context loop · runaway tool-calling loop
+> 11 incident(s) in the published catalogue; absent when the ratio stays under
+> about 15:1, which normal chat traffic does
+> measured: `sustained input/output ratio = 74.02 (measured on prod-agent)`
+> OWASP AISVS C9.1 … / arXiv:2606.04056 …
+
+Two things that keeps honest:
+
+- **A citation has to be earned.** Matching is by finding key, so a finding can
+  only cite a pattern its own checker actually tested for, and the citation is
+  scoped to the same subject the finding is about. If the pattern's signal did not
+  fire on that data, the citation is left off rather than attached anyway.
+- **A match is a hypothesis.** Several patterns are indistinguishable from token
+  counts alone, and the report says so in as many words.
+
 ## The written diagnosis
 
 `report` is for you. `diagnose` is the thing you send to somebody else.

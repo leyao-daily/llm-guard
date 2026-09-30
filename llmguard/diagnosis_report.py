@@ -97,6 +97,12 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0
 .badge.test { background: #eef2ff; color: #1b4dff; }
 .badge.effort { background: #f2f4f8; color: #46506a; }
 .evidence { background: #f7f9fc; border: 0; border-radius: 6px; padding: 11px 13px; margin: 12px 0 0; }
+.catalogue { border-left: 3px solid #667085; background: #fbfcfe; padding: 10px 13px;
+             margin: 12px 0 0; border-radius: 0 6px 6px 0; }
+.catalogue .k { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
+                color: #667085; margin-bottom: 5px; }
+.catalogue .name { font-weight: 650; font-size: 14px; margin-bottom: 3px; }
+.catalogue .src { font-size: 11.5px; color: #667085; margin-top: 6px; line-height: 1.5; }
 .evidence .k { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
                color: #667085; margin-bottom: 4px; }
 .evidence-lines { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -154,6 +160,40 @@ def _evidence_block(f: Finding) -> str:
     )
 
 
+def _catalogue_block(f: Finding) -> str:
+    """Show which documented failure this finding corresponds to, with citations.
+
+    Deliberately placed after the evidence, not before. A citation establishes
+    that the pattern is real, but the customer's own numbers are what make it
+    relevant to them, and reading order should say so.
+    """
+    c = f.catalogue
+    if not c:
+        return ""
+    incidents = c.get("recorded_incidents") or 0
+    loss = c.get("largest_reported_loss_usd")
+    bits = []
+    if incidents:
+        bits.append(f"{incidents} incident(s) in the published catalogue")
+    if loss:
+        bits.append(f"largest reported loss ${loss:,.0f}")
+    if c.get("absent_when"):
+        bits.append(f"absent when {c['absent_when']}")
+    detail = "; ".join(bits)
+    sources = "<br>".join(_e(s) for s in c.get("sources", []))
+    return (
+        '        <div class="catalogue">'
+        '<div class="k">Matches a documented failure pattern</div>'
+        f'<div class="name">{_e(c["name"])} &middot; <span style="font-weight:400;color:#667085">'
+        f'{_e(c["cluster"])}</span></div>'
+        f'<div class="fine">{_e(c["summary"])}</div>'
+        + (f'<div class="fine" style="margin-top:6px">{_e(detail)}</div>' if detail else "")
+        + f'<div class="fine" style="margin-top:6px">measured: <code>{_e(c["signal_measured"])}</code></div>'
+        + f'<div class="src">{sources}</div>'
+        "</div>"
+    )
+
+
 def _finding_html(f: Finding, index: int) -> str:
     label, explanation = CONFIDENCE_LABEL.get(f.confidence, ("", ""))
     money_cls = "money" if f.has_money else "money zero"
@@ -169,6 +209,7 @@ def _finding_html(f: Finding, index: int) -> str:
         </div>
         <p>{_e(f.detail)}</p>
         {_evidence_block(f)}
+{_catalogue_block(f)}
         <div class="remedy">
           <div class="k">What to do</div>
           <p>{_e(f.remedy)}</p>
@@ -308,6 +349,14 @@ def render_diagnosis_html(
     local token estimate, using per-model rates including separate cached-input and cache-write
     categories. Findings are derived from token counts, latency, status codes and attribution
     labels. Prompt and completion content was not read at any point.
+  </p>
+  <p class="fine">
+    Findings that correspond to a catalogued production failure pattern carry the
+    citation, the number of recorded incidents and the largest reported loss. The
+    taxonomy is not ours: it comes from OWASP AISVS C9.1 and the published
+    catalogue of 63 confirmed incidents in arXiv:2606.04056. A citation means the
+    observed signal matched a documented pattern, not that the pattern is
+    confirmed in your case.
   </p>
   <p class="fine">
     Saving estimates are bounds. Where a figure depends on an assumption about your

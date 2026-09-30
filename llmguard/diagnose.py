@@ -61,6 +61,10 @@ class Finding:
     confidence: str = CONFIDENCE_LIKELY
     remedy: str = ""
     effort: str = ""          # "an afternoon" | "a sprint" | "an architecture change"
+    #: Set when this finding corresponds to a catalogued production failure
+    #: pattern. Carries the citation, the incident count and the reported loss,
+    #: so the report asserts a recognised pattern rather than our opinion.
+    catalogue: Optional[dict] = None
 
     @property
     def mid_saving(self) -> float:
@@ -559,6 +563,80 @@ def check_concentration(store: Store, days: int) -> Optional[Finding]:
 
 
 # ---------------------------------------------------------------------------
+# mapping our checks onto the published taxonomy
+# ---------------------------------------------------------------------------
+# Not every check corresponds to a catalogued incident pattern, and inventing a
+# mapping for the ones that do not would weaken the ones that do.
+PATTERN_FOR_FINDING = {
+    "context_bloat": "context_loop",
+    "cache_opportunity": "uncached_prefix",
+    "routing": "premium_model_default",
+    "errors": "retry_storm",
+    "attribution": "no_attribution",
+    "unpriced": "silent_unpriced",
+    "concentration": "premium_model_default",
+}
+
+
+def attach_catalogue(findings: List[Finding], store: Store, days: int, granularity: str) -> None:
+    """Annotate findings with the catalogued pattern they correspond to.
+
+    Scoped to the same subject the finding is about. A loop is usually confined to
+    one key, so measuring the whole account would dilute it below the pattern's
+    threshold and the citation would silently not appear, even though the loop is
+    right there in the finding above it.
+
+    Matching is by finding key rather than by re-deriving the signal, so a finding
+    can only cite a pattern the checker actually tested for. A citation that was
+    not earned by the data would be the worst kind of marketing.
+    """
+    from .analytics import _window_clause
+    from .incidents import PATTERNS_BY_KEY, match_patterns, measure
+
+    where, params = _window_clause(days)
+    # Subjects named by the findings, so each can be measured on its own.
+    subjects = []
+    for finding in findings:
+        subject = finding.evidence.get("api_key_id")
+        if subject:
+            subjects.append(str(subject))
+
+    scopes: Dict[str, Tuple[str, Sequence]] = {"__all__": (where, params)}
+    for subject in set(subjects):
+        scopes[subject] = (f"{where} AND api_key_id = ?", tuple(params) + (subject,))
+
+    fired: Dict[Tuple[str, str], object] = {}
+    for scope_name, (sql, sql_params) in scopes.items():
+        measures = measure(store, window_sql=sql, params=sql_params, granularity=granularity)
+        for match in match_patterns(measures):
+            fired[(scope_name, match.pattern.key)] = match
+
+    for finding in findings:
+        key = PATTERN_FOR_FINDING.get(finding.key)
+        if not key:
+            continue
+        subject = str(finding.evidence.get("api_key_id") or "")
+        match = fired.get((subject, key)) or fired.get(("__all__", key))
+        if match is None:
+            continue
+        pattern = PATTERNS_BY_KEY[key]
+        signal = match.fired[0]
+        scope_note = (
+            f"measured on {subject}" if (subject, key) in fired else "measured across the account"
+        )
+        finding.catalogue = {
+            "name": pattern.name,
+            "cluster": pattern.cluster,
+            "recorded_incidents": pattern.recorded_incidents,
+            "largest_reported_loss_usd": pattern.typical_loss_usd,
+            "signal_measured": f"{signal.name} = {signal.value_of(match.measures):.4g} ({scope_note})",
+            "absent_when": pattern.absent_when,
+            "sources": pattern.cites(),
+            "summary": pattern.summary,
+        }
+
+
+# ---------------------------------------------------------------------------
 # assembly
 # ---------------------------------------------------------------------------
 def diagnose(store: Store, days: int = 30) -> Diagnosis:
@@ -647,6 +725,11 @@ def diagnose(store: Store, days: int = 30) -> Diagnosis:
         "latency and cost. Findings about *why* volume is high are inferred from shape, "
         "not from reading your calls."
     )
+    d.gaps.append(
+        "Where a finding cites a catalogued failure pattern, that is a pattern match and not "
+        "a confirmed diagnosis. Several patterns are indistinguishable from token counts "
+        "alone; the citation tells you which documented failure this most resembles."
+    )
     if granularity == "bucket":
         d.gaps.append(
             "This data is aggregated by day rather than per request, so there is no "
@@ -655,4 +738,5 @@ def diagnose(store: Store, days: int = 30) -> Diagnosis:
             "buckets rather than calls."
         )
 
+    attach_catalogue(d.findings, store, days, granularity)
     return d

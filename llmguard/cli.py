@@ -215,6 +215,39 @@ def cmd_budget(args: argparse.Namespace) -> int:
         store.close()
 
 
+def cmd_patterns(args: argparse.Namespace) -> int:
+    """Print the catalogued failure patterns this tool detects."""
+    from .incidents import PATTERNS, describe_catalogue
+
+    if args.format == "json":
+        print(json.dumps({
+            "sources": [
+                "OWASP AISVS C9.1 (Execution Budgets, Loop Control, Circuit Breakers), rev. 2026-07-13",
+                "arXiv:2606.04056 (Khan, 2026-06) - catalogue of 63 confirmed production incidents",
+            ],
+            "patterns": [
+                {
+                    "key": p.key, "name": p.name, "cluster": p.cluster,
+                    "summary": p.summary,
+                    "signals": [s.name for s in p.signals],
+                    "recorded_incidents": p.recorded_incidents,
+                    "largest_reported_loss_usd": p.typical_loss_usd,
+                    "absent_when": p.absent_when,
+                    "remedy": p.remedy,
+                    "effort": p.effort,
+                    "sources": p.cites(),
+                }
+                for p in PATTERNS
+            ],
+        }, indent=2, ensure_ascii=False))
+        return 0
+
+    print(describe_catalogue())
+    print(f"  {len(PATTERNS)} patterns. Matching a pattern is a hypothesis, not a diagnosis:")
+    print("  several of these are indistinguishable from token counts alone.")
+    return 0
+
+
 def cmd_import(args: argparse.Namespace) -> int:
     """Bring a prospect's usage data in, before they commit to anything."""
     from .intake import (
@@ -711,6 +744,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 
+
+
+    p = sub.add_parser("patterns", help="the catalogued failure patterns this tool detects")
+    p.add_argument("--format", choices=["text", "json"], default="text")
+    p.set_defaults(func=cmd_patterns)
 
     p = sub.add_parser("import", help="load usage data from a file or a provider's admin API")
     p.add_argument("--source", choices=["file", "anthropic", "openai"], default="file")
